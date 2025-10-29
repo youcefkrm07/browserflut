@@ -38,12 +38,22 @@ class _BrowserScreenState extends State<BrowserScreen> {
   bool _canGoForward = false;
   int _progress = 0; // 0-100
 
+  final Map<String, String> _userAgentOptions = {
+    'Default': '',
+    'Chrome Desktop':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+    'Safari on iPhone':
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 16_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1',
+  };
+  String _currentUserAgent = 'Default';
+
   @override
   void initState() {
     super.initState();
 
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setUserAgent(_userAgentOptions[_currentUserAgent])
       ..setNavigationDelegate(
         NavigationDelegate(
           onProgress: (p) => setState(() => _progress = p),
@@ -59,6 +69,43 @@ class _BrowserScreenState extends State<BrowserScreen> {
         ),
       )
       ..loadRequest(Uri.parse(_urlCtrl.text));
+  }
+
+  void _showUserAgentDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Customize User Agent'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: _userAgentOptions.keys.map((String key) {
+              return RadioListTile<String>(
+                title: Text(key),
+                value: key,
+                groupValue: _currentUserAgent,
+                onChanged: (String? value) {
+                  setState(() {
+                    _currentUserAgent = value!;
+                    _controller.setUserAgent(_userAgentOptions[_currentUserAgent]);
+                    _controller.reload();
+                  });
+                  Navigator.of(context).pop();
+                },
+              );
+            }).toList(),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Close'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -148,6 +195,21 @@ class _BrowserScreenState extends State<BrowserScreen> {
               icon: const Icon(Icons.arrow_circle_right_outlined),
               onPressed: _loadFromField,
               tooltip: 'Go',
+            ),
+            PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'Customize User Agent') {
+                  _showUserAgentDialog();
+                }
+              },
+              itemBuilder: (BuildContext context) {
+                return {'Customize User Agent'}.map((String choice) {
+                  return PopupMenuItem<String>(
+                    value: choice,
+                    child: Text(choice),
+                  );
+                }).toList();
+              },
             ),
             const SizedBox(width: 6),
           ],
