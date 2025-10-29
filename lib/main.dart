@@ -33,7 +33,7 @@ class BrowserScreen extends StatefulWidget {
 class _BrowserScreenState extends State<BrowserScreen> {
   late final WebViewController _controller;
   final TextEditingController _urlCtrl =
-      TextEditingController(text: 'https://flutter.dev');
+      TextEditingController(text: 'https://www.google.com');
   bool _canGoBack = false;
   bool _canGoForward = false;
   int _progress = 0; // 0-100
