@@ -80,14 +80,24 @@ class _BrowserScreenState extends State<BrowserScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: _userAgentOptions.keys.map((String key) {
-              return RadioListTile<String>(
+              return ListTile(
                 title: Text(key),
-                value: key,
-                groupValue: _currentUserAgent,
-                onChanged: (String? value) {
+                leading: Radio<String>(
+                  value: key,
+                  groupValue: _currentUserAgent,
+                  onChanged: (String? value) {
+                    setState(() {
+                      _currentUserAgent = value!;
+                      _controller.setUserAgent(_userAgentOptions[value]);
+                      _controller.reload();
+                    });
+                    Navigator.of(context).pop();
+                  },
+                ),
+                onTap: () {
                   setState(() {
-                    _currentUserAgent = value!;
-                    _controller.setUserAgent(_userAgentOptions[_currentUserAgent]);
+                    _currentUserAgent = key;
+                    _controller.setUserAgent(_userAgentOptions[key]);
                     _controller.reload();
                   });
                   Navigator.of(context).pop();
