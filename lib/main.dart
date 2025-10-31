@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 void main() {
@@ -12,6 +13,30 @@ enum _BrowserMenuAction {
   setHome,
   clearHistory,
   clearBookmarks,
+}
+
+class _BrowserTab {
+  _BrowserTab({
+    required this.controller,
+    required String initialUrl,
+  }) : currentUrl = initialUrl;
+
+  final WebViewController controller;
+  String currentUrl;
+  int progress = 0;
+  bool canGoBack = false;
+  bool canGoForward = false;
+
+  String get displayTitle {
+    final uri = Uri.tryParse(currentUrl);
+    if (uri != null && uri.host.isNotEmpty) {
+      return uri.host;
+    }
+    if (currentUrl.isNotEmpty) {
+      return currentUrl;
+    }
+    return 'New tab';
+  }
 }
 
 class TinyBrowserApp extends StatelessWidget {
@@ -39,129 +64,85 @@ class BrowserScreen extends StatefulWidget {
 }
 
 class _BrowserScreenState extends State<BrowserScreen> {
-  late final WebViewController _controller;
+  static const String _defaultStartupUrl = 'https://www.google.com';
+
+  final List<_BrowserTab> _tabs = <_BrowserTab>[];
+  int _activeTabIndex = 0;
   final TextEditingController _urlCtrl =
-      TextEditingController(text: 'https://www.google.com');
+      TextEditingController(text: _defaultStartupUrl);
   final FocusNode _addressFocusNode = FocusNode();
-  bool _canGoBack = false;
-  bool _canGoForward = false;
-  int _progress = 0; // 0-100
-  String _currentUrl = 'https://www.google.com';
-  String _homeUrl = 'https://www.google.com';
+  String _homeUrl = _defaultStartupUrl;
   static const int _historyLimit = 50;
   final List<String> _history = <String>[];
   final Set<String> _bookmarks = <String>{};
-  bool _isBookmarked = false;
 
-  final Map<String, String> _userAgentOptions = {
-    'Default': '',
+  final Map<String, String?> _userAgentOptions = {
+    'Default': null,
     'Chrome Desktop':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
     'Safari on iPhone':
         'Mozilla/5.0 (iPhone; CPU iPhone OS 16_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1',
   };
-  String _currentUserAgent = 'Default';
+  static const String _customUserAgentKey = 'Custom';
+  String _selectedUserAgentKey = 'Default';
+  String? _customUserAgent;
+
+  bool get _hasTabs => _tabs.isNotEmpty;
+
+  _BrowserTab get _activeTab => _tabs[_activeTabIndex];
+
+  WebViewController get _activeController => _activeTab.controller;
+
+  String get _currentUrl => _activeTab.currentUrl;
+
+  bool get _isBookmarked => _bookmarks.contains(_currentUrl);
+
+  int get _activeProgress => _activeTab.progress;
+
+  bool get _activeCanGoBack => _activeTab.canGoBack;
+
+  bool get _activeCanGoForward => _activeTab.canGoForward;
+
+  String? get _resolvedUserAgent {
+    if (_selectedUserAgentKey == _customUserAgentKey) {
+      final custom = _customUserAgent;
+      if (custom != null && custom.isNotEmpty) {
+        return custom;
+      }
+      return null;
+    }
+    return _userAgentOptions[_selectedUserAgentKey];
+  }
 
   @override
   void initState() {
     super.initState();
-
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setUserAgent(_userAgentOptions[_currentUserAgent])
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onProgress: (p) {
-            if (!mounted) return;
-            setState(() => _progress = p);
-          },
-          onPageStarted: (url) {
-            if (!mounted) return;
-            setState(() {
-              _progress = 0;
-              _currentUrl = url;
-              _isBookmarked = _bookmarks.contains(url);
-            });
-            if (!_addressFocusNode.hasFocus && _urlCtrl.text != url) {
-              _urlCtrl.text = url;
-            }
-          },
-          onPageFinished: (url) async {
-            final back = await _controller.canGoBack();
-            final fwd = await _controller.canGoForward();
-            if (!mounted) return;
-            setState(() {
-              _canGoBack = back;
-              _canGoForward = fwd;
-              _progress = 100;
-              _currentUrl = url;
-              _isBookmarked = _bookmarks.contains(url);
-              _history.remove(url);
-              _history.insert(0, url);
-              if (_history.length > _historyLimit) {
-                _history.removeRange(_historyLimit, _history.length);
-              }
-            });
-            if (!_addressFocusNode.hasFocus && _urlCtrl.text != url) {
-              _urlCtrl.text = url;
-            }
-          },
-          onWebResourceError: (error) {
-            if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(error.description)),
-            );
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse(_currentUrl));
+    final controller = WebViewController();
+    final tab = _BrowserTab(controller: controller, initialUrl: _homeUrl);
+    _tabs.add(tab);
+    _configureTab(0, _homeUrl);
   }
 
-  void _showUserAgentDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Customize User Agent'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: _userAgentOptions.keys.map((String key) {
-              return ListTile(
-                title: Text(key),
-                leading: Radio<String>(
-                  value: key,
-                  groupValue: _currentUserAgent,
-                  onChanged: (String? value) {
-                    setState(() {
-                      _currentUserAgent = value!;
-                      _controller.setUserAgent(_userAgentOptions[value]);
-                      _controller.reload();
-                    });
-                    Navigator.of(context).pop();
-                  },
-                ),
-                onTap: () {
-                  setState(() {
-                    _currentUserAgent = key;
-                    _controller.setUserAgent(_userAgentOptions[key]);
-                    _controller.reload();
-                  });
-                  Navigator.of(context).pop();
-                },
-              );
-            }).toList(),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Close'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-          ],
-        );
-      },
-    );
+  void _configureTab(int index, String initialUrl) {
+    final tab = _tabs[index];
+    tab.currentUrl = initialUrl;
+    tab.progress = 0;
+    tab.canGoBack = false;
+    tab.canGoForward = false;
+
+    tab.controller
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setUserAgent(_resolvedUserAgent)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onProgress: (progress) => _handleProgress(index, progress),
+          onPageStarted: (url) => _handlePageStarted(index, url),
+          onPageFinished: (url) => _handlePageFinished(index, url),
+          onWebResourceError: (error) =>
+              _handleWebResourceError(index, error),
+        ),
+      )
+      ..loadRequest(Uri.parse(initialUrl));
   }
 
   @override
@@ -171,6 +152,109 @@ class _BrowserScreenState extends State<BrowserScreen> {
     super.dispose();
   }
 
+  void _handleProgress(int tabIndex, int progress) {
+    if (!mounted || tabIndex >= _tabs.length) return;
+    setState(() {
+      _tabs[tabIndex].progress = progress;
+    });
+  }
+
+  void _handlePageStarted(int tabIndex, String url) {
+    if (!mounted || tabIndex >= _tabs.length) return;
+    final tab = _tabs[tabIndex];
+    setState(() {
+      tab.progress = 0;
+      tab.currentUrl = url;
+    });
+    if (_activeTabIndex == tabIndex &&
+        !_addressFocusNode.hasFocus &&
+        _urlCtrl.text != url) {
+      _urlCtrl.text = url;
+    }
+  }
+
+  Future<void> _handlePageFinished(int tabIndex, String url) async {
+    if (!mounted || tabIndex >= _tabs.length) return;
+    final tab = _tabs[tabIndex];
+    final controller = tab.controller;
+    final back = await controller.canGoBack();
+    final forward = await controller.canGoForward();
+    if (!mounted || tabIndex >= _tabs.length) return;
+    setState(() {
+      tab.canGoBack = back;
+      tab.canGoForward = forward;
+      tab.progress = 100;
+      tab.currentUrl = url;
+      _history.remove(url);
+      _history.insert(0, url);
+      if (_history.length > _historyLimit) {
+        _history.removeRange(_historyLimit, _history.length);
+      }
+    });
+    if (_activeTabIndex == tabIndex &&
+        !_addressFocusNode.hasFocus &&
+        _urlCtrl.text != url) {
+      _urlCtrl.text = url;
+    }
+  }
+
+  void _handleWebResourceError(int tabIndex, WebResourceError error) {
+    if (!mounted) return;
+    if (tabIndex < _tabs.length) {
+      setState(() {
+        _tabs[tabIndex].progress = 100;
+      });
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(error.description)),
+    );
+  }
+
+  void _switchToTab(int index) {
+    if (index == _activeTabIndex) return;
+    setState(() {
+      _activeTabIndex = index;
+    });
+    if (!_addressFocusNode.hasFocus) {
+      _urlCtrl.text = _tabs[index].currentUrl;
+    }
+  }
+
+  void _addNewTab({String? initialUrl}) {
+    final url = initialUrl ?? _homeUrl;
+    final controller = WebViewController();
+    final tab = _BrowserTab(controller: controller, initialUrl: url);
+    final newIndex = _tabs.length;
+    _tabs.add(tab);
+    _configureTab(newIndex, url);
+    setState(() {
+      _activeTabIndex = newIndex;
+    });
+    if (!_addressFocusNode.hasFocus) {
+      _urlCtrl.text = url;
+    }
+  }
+
+  void _closeTab(int index) {
+    if (_tabs.length <= 1) return;
+    final wasActive = index == _activeTabIndex;
+    setState(() {
+      _tabs.removeAt(index);
+      if (_tabs.isEmpty) {
+        _activeTabIndex = 0;
+        return;
+      }
+      if (wasActive) {
+        _activeTabIndex = index >= _tabs.length ? _tabs.length - 1 : index;
+      } else if (index < _activeTabIndex) {
+        _activeTabIndex -= 1;
+      }
+    });
+    if (_hasTabs && !_addressFocusNode.hasFocus) {
+      _urlCtrl.text = _currentUrl;
+    }
+  }
+
   bool _isHttpScheme(String? scheme) => scheme == 'http' || scheme == 'https';
 
   Uri _buildSearchUri(String query) {
@@ -178,12 +262,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   Future<void> _loadUri(Uri uri) async {
-    await _controller.loadRequest(uri);
+    if (!_hasTabs) return;
+    final tab = _activeTab;
+    await tab.controller.loadRequest(uri);
     if (!mounted) return;
     setState(() {
-      _progress = 0;
-      _currentUrl = uri.toString();
-      _isBookmarked = _bookmarks.contains(_currentUrl);
+      tab.progress = 0;
+      tab.currentUrl = uri.toString();
+      tab.canGoBack = false;
+      tab.canGoForward = false;
     });
     if (!_addressFocusNode.hasFocus) {
       _urlCtrl.text = uri.toString();
@@ -248,18 +335,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
     setState(() {
       if (_bookmarks.contains(_currentUrl)) {
         _bookmarks.remove(_currentUrl);
-        _isBookmarked = false;
       } else {
         _bookmarks.add(_currentUrl);
-        _isBookmarked = true;
       }
     });
+    final message = _bookmarks.contains(_currentUrl)
+        ? 'Added to bookmarks.'
+        : 'Removed from bookmarks.';
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          _isBookmarked ? 'Added to bookmarks.' : 'Removed from bookmarks.',
-        ),
-      ),
+      SnackBar(content: Text(message)),
     );
   }
 
@@ -303,7 +387,6 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 onPressed: () {
                   setState(() {
                     _bookmarks.remove(url);
-                    _isBookmarked = _bookmarks.contains(_currentUrl);
                   });
                   Navigator.of(ctx).pop();
                 },
@@ -385,21 +468,203 @@ class _BrowserScreenState extends State<BrowserScreen> {
     if (_bookmarks.isEmpty) return;
     setState(() {
       _bookmarks.clear();
-      _isBookmarked = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Bookmarks cleared.')),
     );
   }
 
+  Future<void> _applyUserAgent({
+    required String key,
+    String? value,
+  }) async {
+    final String? resolved =
+        key == _customUserAgentKey ? value : _userAgentOptions[key];
+    setState(() {
+      _selectedUserAgentKey = key;
+      if (key == _customUserAgentKey) {
+        _customUserAgent = value;
+      }
+    });
+
+    await Future.wait(
+      _tabs.map((tab) => tab.controller.setUserAgent(resolved)),
+    );
+
+    if (mounted && _hasTabs) {
+      await _activeController.reload();
+    }
+  }
+
+  void _showUserAgentDialog() {
+    final customCtrl = TextEditingController(text: _customUserAgent ?? '');
+    var selection = _selectedUserAgentKey;
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          title: const Text('Customize User Agent'),
+          content: StatefulBuilder(
+            builder: (ctx, setStateDialog) {
+              return SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ..._userAgentOptions.entries.map(
+                      (entry) => RadioListTile<String>(
+                        title: Text(entry.key),
+                        value: entry.key,
+                        groupValue: selection,
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setStateDialog(() {
+                            selection = value;
+                          });
+                        },
+                      ),
+                    ),
+                    const Divider(),
+                    RadioListTile<String>(
+                      value: _customUserAgentKey,
+                      groupValue: selection,
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setStateDialog(() {
+                          selection = value;
+                        });
+                      },
+                      title: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Custom user agent'),
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: customCtrl,
+                            decoration: const InputDecoration(
+                              hintText: 'Enter user agent',
+                              border: OutlineInputBorder(),
+                            ),
+                            minLines: 1,
+                            maxLines: 3,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogCtx).pop();
+              },
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.of(dialogCtx).pop();
+                if (selection == _customUserAgentKey) {
+                  final value = customCtrl.text.trim();
+                  await _applyUserAgent(
+                    key: _customUserAgentKey,
+                    value: value.isEmpty ? null : value,
+                  );
+                } else {
+                  await _applyUserAgent(
+                    key: selection,
+                    value: _userAgentOptions[selection],
+                  );
+                }
+              },
+              child: const Text('Apply'),
+            ),
+          ],
+        );
+      },
+    ).then((_) => customCtrl.dispose());
+  }
+
+  Widget _buildTabStrip() {
+    if (_tabs.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: List.generate(_tabs.length, (index) {
+                  final tab = _tabs[index];
+                  final isActive = index == _activeTabIndex;
+                  final label = '${index + 1}. ${tab.displayTitle}';
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Tooltip(
+                      message: tab.currentUrl,
+                      child: InputChip(
+                        label: Text(
+                          label,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        showCheckmark: false,
+                        selected: isActive,
+                        selectedColor: Theme.of(context)
+                            .colorScheme
+                            .primaryContainer,
+                        onPressed: () => _switchToTab(index),
+                        onDeleted: _tabs.length > 1
+                            ? () => _closeTab(index)
+                            : null,
+                        deleteIcon: _tabs.length > 1
+                            ? const Icon(Icons.close, size: 18)
+                            : null,
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.add),
+            tooltip: 'New tab',
+            onPressed: () => _addNewTab(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _exitApp() {
+    try {
+      SystemNavigator.pop();
+    } catch (_) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).maybePop();
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final hasTabs = _hasTabs;
+    final showProgress = hasTabs && _activeProgress < 100;
+
     return PopScope(
-      canPop: !_canGoBack,
+      canPop: !hasTabs || !_activeCanGoBack,
       onPopInvoked: (didPop) async {
+        if (!hasTabs) return;
         if (didPop) return;
-        if (await _controller.canGoBack()) {
-          await _controller.goBack();
+        if (await _activeController.canGoBack()) {
+          await _activeController.goBack();
         } else if (mounted) {
           Navigator.of(context).maybePop();
         }
@@ -434,31 +699,31 @@ class _BrowserScreenState extends State<BrowserScreen> {
           actions: [
             IconButton(
               icon: const Icon(Icons.arrow_back),
-              onPressed: _canGoBack
+              onPressed: _activeCanGoBack
                   ? () async {
-                      await _controller.goBack();
+                      await _activeController.goBack();
                     }
                   : null,
               tooltip: 'Back',
             ),
             IconButton(
               icon: const Icon(Icons.arrow_forward),
-              onPressed: _canGoForward
+              onPressed: _activeCanGoForward
                   ? () async {
-                      await _controller.goForward();
+                      await _activeController.goForward();
                     }
                   : null,
               tooltip: 'Forward',
             ),
             IconButton(
               icon: const Icon(Icons.home_outlined),
-              onPressed: _loadHome,
+              onPressed: () => _loadHome(),
               tooltip: 'Home',
             ),
             IconButton(
               icon: const Icon(Icons.refresh),
               onPressed: () async {
-                await _controller.reload();
+                await _activeController.reload();
               },
               tooltip: 'Reload',
             ),
@@ -471,8 +736,13 @@ class _BrowserScreenState extends State<BrowserScreen> {
               tooltip: _isBookmarked ? 'Remove bookmark' : 'Add bookmark',
             ),
             IconButton(
+              icon: const Icon(Icons.add_box_outlined),
+              onPressed: () => _addNewTab(),
+              tooltip: 'New Tab',
+            ),
+            IconButton(
               icon: const Icon(Icons.arrow_circle_right_outlined),
-              onPressed: _loadFromField,
+              onPressed: () => _loadFromField(),
               tooltip: 'Go',
             ),
             PopupMenuButton<_BrowserMenuAction>(
@@ -528,17 +798,25 @@ class _BrowserScreenState extends State<BrowserScreen> {
                 ),
               ],
             ),
+            IconButton(
+              icon: const Icon(Icons.exit_to_app),
+              onPressed: _exitApp,
+              tooltip: 'Exit',
+            ),
             const SizedBox(width: 6),
           ],
         ),
         body: Column(
           children: [
-            if (_progress < 100)
-              LinearProgressIndicator(value: _progress / 100),
+            _buildTabStrip(),
+            if (showProgress)
+              LinearProgressIndicator(value: _activeProgress / 100),
             Expanded(
               child: SafeArea(
                 top: false,
-                child: WebViewWidget(controller: _controller),
+                child: hasTabs
+                    ? WebViewWidget(controller: _activeController)
+                    : const SizedBox.shrink(),
               ),
             ),
           ],
