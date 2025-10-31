@@ -126,20 +126,16 @@ class _BrowserScreenState extends State<BrowserScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: _userAgentOptions.keys.map((String key) {
+              final isSelected = _currentUserAgent == key;
               return ListTile(
-                title: Text(key),
-                leading: Radio<String>(
-                  value: key,
-                  groupValue: _currentUserAgent,
-                  onChanged: (String? value) {
-                    setState(() {
-                      _currentUserAgent = value!;
-                      _controller.setUserAgent(_userAgentOptions[value]);
-                      _controller.reload();
-                    });
-                    Navigator.of(context).pop();
-                  },
+                leading: Icon(
+                  isSelected
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color:
+                      isSelected ? Theme.of(context).colorScheme.primary : null,
                 ),
+                title: Text(key),
                 onTap: () {
                   setState(() {
                     _currentUserAgent = key;
@@ -396,13 +392,14 @@ class _BrowserScreenState extends State<BrowserScreen> {
   Widget build(BuildContext context) {
     return PopScope(
       canPop: !_canGoBack,
-      onPopInvoked: (didPop) async {
+      onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
         if (await _controller.canGoBack()) {
           await _controller.goBack();
-        } else if (mounted) {
-          Navigator.of(context).maybePop();
+          return;
         }
+        if (!mounted) return;
+        Navigator.of(context).maybePop();
       },
       child: Scaffold(
         appBar: AppBar(
