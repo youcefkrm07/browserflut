@@ -60,7 +60,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
     'Safari on iPhone':
         'Mozilla/5.0 (iPhone; CPU iPhone OS 16_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1',
   };
+  static const String _customUserAgentKey = 'Custom user agent';
   String _currentUserAgent = 'Default';
+  String? _customUserAgent;
 
   @override
   void initState() {
@@ -118,50 +120,129 @@ class _BrowserScreenState extends State<BrowserScreen> {
   }
 
   void _showUserAgentDialog() {
+    final TextEditingController customController =
+        TextEditingController(text: _customUserAgent ?? '');
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Customize User Agent'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: _userAgentOptions.keys.map((String key) {
-              return ListTile(
-                title: Text(key),
-                leading: Radio<String>(
-                  value: key,
-                  groupValue: _currentUserAgent,
-                  onChanged: (String? value) {
-                    setState(() {
-                      _currentUserAgent = value!;
-                      _controller.setUserAgent(_userAgentOptions[value]);
-                      _controller.reload();
-                    });
-                    Navigator.of(context).pop();
-                  },
+      builder: (BuildContext dialogContext) {
+        String selection = _currentUserAgent;
+        return StatefulBuilder(
+          builder: (BuildContext context,
+              void Function(void Function()) setDialogState) {
+            final bool usingCustom = selection == _customUserAgentKey;
+            final String trimmedCustom = customController.text.trim();
+            return AlertDialog(
+              title: const Text('Customize User Agent'),
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 360),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ..._userAgentOptions.keys.map(
+                        (String key) => ListTile(
+                          dense: true,
+                          visualDensity: VisualDensity.compact,
+                          contentPadding: EdgeInsets.zero,
+                          leading: Radio<String>(
+                            value: key,
+                            groupValue: selection,
+                            onChanged: (String? value) {
+                              if (value == null) return;
+                              setDialogState(() {
+                                selection = value;
+                              });
+                            },
+                          ),
+                          title: Text(key),
+                          onTap: () {
+                            setDialogState(() {
+                              selection = key;
+                            });
+                          },
+                        ),
+                      ),
+                      const Divider(height: 24),
+                      ListTile(
+                        dense: true,
+                        visualDensity: VisualDensity.compact,
+                        contentPadding: EdgeInsets.zero,
+                        leading: Radio<String>(
+                          value: _customUserAgentKey,
+                          groupValue: selection,
+                          onChanged: (String? value) {
+                            if (value == null) return;
+                            setDialogState(() {
+                              selection = value;
+                            });
+                          },
+                        ),
+                        title: const Text('Custom user agent'),
+                        onTap: () {
+                          setDialogState(() {
+                            selection = _customUserAgentKey;
+                          });
+                        },
+                      ),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 150),
+                        child: usingCustom
+                            ? Padding(
+                                key: const ValueKey('custom-user-agent-field'),
+                                padding: const EdgeInsets.only(top: 12),
+                                child: TextField(
+                                  controller: customController,
+                                  autofocus: true,
+                                  maxLines: 3,
+                                  keyboardType: TextInputType.text,
+                                  textInputAction: TextInputAction.done,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Enter user agent',
+                                    alignLabelWithHint: true,
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  onChanged: (_) => setDialogState(() {}),
+                                ),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  ),
                 ),
-                onTap: () {
-                  setState(() {
-                    _currentUserAgent = key;
-                    _controller.setUserAgent(_userAgentOptions[key]);
-                    _controller.reload();
-                  });
-                  Navigator.of(context).pop();
-                },
-              );
-            }).toList(),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Close'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-          ],
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: usingCustom && trimmedCustom.isEmpty
+                      ? null
+                      : () {
+                          this.setState(() {
+                            _currentUserAgent = selection;
+                            if (selection == _customUserAgentKey) {
+                              _customUserAgent = trimmedCustom;
+                              _controller.setUserAgent(trimmedCustom);
+                            } else {
+                              _controller.setUserAgent(
+                                _userAgentOptions[selection],
+                              );
+                            }
+                          });
+                          _controller.reload();
+                          Navigator.of(dialogContext).pop();
+                        },
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
         );
       },
-    );
+    ).whenComplete(customController.dispose);
   }
 
   @override
