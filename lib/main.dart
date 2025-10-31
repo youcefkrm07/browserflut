@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 void main() {
@@ -53,14 +55,15 @@ class _BrowserScreenState extends State<BrowserScreen> {
   final Set<String> _bookmarks = <String>{};
   bool _isBookmarked = false;
 
-  final Map<String, String> _userAgentOptions = {
-    'Default': '',
+  final Map<String, String?> _userAgentOptions = {
+    'Default': null,
     'Chrome Desktop':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
     'Safari on iPhone':
         'Mozilla/5.0 (iPhone; CPU iPhone OS 16_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Mobile/15E148 Safari/604.1',
   };
   String _currentUserAgent = 'Default';
+  String? _customUserAgent;
 
   @override
   void initState() {
@@ -117,51 +120,147 @@ class _BrowserScreenState extends State<BrowserScreen> {
       ..loadRequest(Uri.parse(_currentUrl));
   }
 
-  void _showUserAgentDialog() {
-    showDialog(
+  Future<void> _applyUserAgent(
+    String selection, {
+    String? customAgent,
+  }) async {
+    String? userAgent = selection == 'Custom'
+        ? customAgent
+        : _userAgentOptions[selection];
+
+    await _controller.setUserAgent(userAgent);
+    final uri = Uri.tryParse(_currentUrl);
+    if (uri != null && _isHttpScheme(uri.scheme)) {
+      await _controller.loadRequest(uri);
+    } else {
+      await _controller.reload();
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _currentUserAgent = selection;
+      if (selection == 'Custom') {
+        _customUserAgent = customAgent;
+      }
+    });
+
+    final label = selection == 'Custom'
+        ? 'Custom user agent applied'
+        : 'User agent set to $selection';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(label)),
+    );
+  }
+
+  Future<void> _showUserAgentDialog() async {
+    final customController =
+        TextEditingController(text: _customUserAgent ?? '');
+    String tempSelection = _currentUserAgent;
+    String? errorText;
+
+    final result = await showDialog<Map<String, String?>>(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Customize User Agent'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: _userAgentOptions.keys.map((String key) {
-              return ListTile(
-                title: Text(key),
-                leading: Radio<String>(
-                  value: key,
-                  groupValue: _currentUserAgent,
-                  onChanged: (String? value) {
-                    setState(() {
-                      _currentUserAgent = value!;
-                      _controller.setUserAgent(_userAgentOptions[value]);
-                      _controller.reload();
-                    });
-                    Navigator.of(context).pop();
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setDialogState) {
+            return AlertDialog(
+              title: const Text('Customize User Agent'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ..._userAgentOptions.keys.map((String key) {
+                      return RadioListTile<String>(
+                        title: Text(key),
+                        value: key,
+                        groupValue: tempSelection,
+                        onChanged: (String? value) {
+                          if (value == null) return;
+                          setDialogState(() {
+                            tempSelection = value;
+                            errorText = null;
+                          });
+                        },
+                      );
+                    }),
+                    RadioListTile<String>(
+                      title: const Text('Custom user agent'),
+                      value: 'Custom',
+                      groupValue: tempSelection,
+                      onChanged: (String? value) {
+                        if (value == null) return;
+                        setDialogState(() {
+                          tempSelection = value;
+                          errorText = null;
+                        });
+                      },
+                    ),
+                    if (tempSelection == 'Custom')
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: TextField(
+                          controller: customController,
+                          minLines: 1,
+                          maxLines: 3,
+                          autofocus: true,
+                          decoration: InputDecoration(
+                            hintText: 'Enter user agent',
+                            border: const OutlineInputBorder(),
+                            errorText: errorText,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  child: const Text('Cancel'),
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
                   },
                 ),
-                onTap: () {
-                  setState(() {
-                    _currentUserAgent = key;
-                    _controller.setUserAgent(_userAgentOptions[key]);
-                    _controller.reload();
-                  });
-                  Navigator.of(context).pop();
-                },
-              );
-            }).toList(),
-          ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Close'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-          ],
+                TextButton(
+                  child: const Text('Apply'),
+                  onPressed: () {
+                    final selected = tempSelection;
+                    String? customValue;
+                    if (selected == 'Custom') {
+                      customValue = customController.text.trim();
+                      if (customValue.isEmpty) {
+                        setDialogState(() {
+                          errorText = 'Please enter a user agent.';
+                        });
+                        return;
+                      }
+                    }
+                    Navigator.of(dialogContext).pop({
+                      'selection': selected,
+                      'custom': customValue,
+                    });
+                  },
+                ),
+              ],
+            );
+          },
         );
       },
     );
+
+    customController.dispose();
+    if (!mounted || result == null) return;
+
+    final selected = result['selection'];
+    if (selected == null) return;
+    await _applyUserAgent(selected, customAgent: result['custom']);
+  }
+
+  void _exitApp() {
+    if (kIsWeb) {
+      Navigator.of(context).maybePop();
+    } else {
+      SystemNavigator.pop();
+    }
   }
 
   @override
@@ -474,6 +573,11 @@ class _BrowserScreenState extends State<BrowserScreen> {
               icon: const Icon(Icons.arrow_circle_right_outlined),
               onPressed: _loadFromField,
               tooltip: 'Go',
+            ),
+            IconButton(
+              icon: const Icon(Icons.exit_to_app),
+              onPressed: _exitApp,
+              tooltip: 'Exit',
             ),
             PopupMenuButton<_BrowserMenuAction>(
               onSelected: (value) {
