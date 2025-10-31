@@ -140,19 +140,21 @@ class _BrowserScreenState extends State<BrowserScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       ..._userAgentOptions.keys.map(
-                        (String key) => RadioListTile<String>(
+                        (String key) => ListTile(
                           dense: true,
                           visualDensity: VisualDensity.compact,
                           contentPadding: EdgeInsets.zero,
+                          leading: Radio<String>(
+                            value: key,
+                            groupValue: selection,
+                            onChanged: (String? value) {
+                              if (value == null) return;
+                              setDialogState(() {
+                                selection = value;
+                              });
+                            },
+                          ),
                           title: Text(key),
-                          value: key,
-                          groupValue: selection,
-                          onChanged: (String? value) {
-                            if (value == null) return;
-                            setDialogState(() {
-                              selection = value;
-                            });
-                          },
                           onTap: () {
                             setDialogState(() {
                               selection = key;
@@ -161,19 +163,21 @@ class _BrowserScreenState extends State<BrowserScreen> {
                         ),
                       ),
                       const Divider(height: 24),
-                      RadioListTile<String>(
+                      ListTile(
                         dense: true,
                         visualDensity: VisualDensity.compact,
                         contentPadding: EdgeInsets.zero,
+                        leading: Radio<String>(
+                          value: _customUserAgentKey,
+                          groupValue: selection,
+                          onChanged: (String? value) {
+                            if (value == null) return;
+                            setDialogState(() {
+                              selection = value;
+                            });
+                          },
+                        ),
                         title: const Text('Custom user agent'),
-                        value: _customUserAgentKey,
-                        groupValue: selection,
-                        onChanged: (String? value) {
-                          if (value == null) return;
-                          setDialogState(() {
-                            selection = value;
-                          });
-                        },
                         onTap: () {
                           setDialogState(() {
                             selection = _customUserAgentKey;
